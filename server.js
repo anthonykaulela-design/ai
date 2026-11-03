@@ -1,6 +1,6 @@
 /**
  * L3 AI Advanced Backend Server
- * Features: Authentication, R500 Llama Payment Gate, Gemini v1 Stable Endpoint, OpenAI, Groq, & L3 Search.
+ * Features: Authentication, R500 Llama Payment Gate, Gemini v1beta (Auto, Low, Medium, High), OpenAI, Groq, & L3 Search.
  */
 
 const express = require('express');
@@ -84,17 +84,27 @@ async function searchGoogle(query) {
     }
 }
 
-// Model Registry with R500 charge flag for Llama models
+// Precise Model Registry including Gemini Auto/Low/Medium/High & R500 Llama gate
 const MODEL_REGISTRY = {
     "L3 AI (Google Search Pro)": { provider: "l3-search", modelName: "gpt-4o-mini", requiresPayment: false },
+    
+    // Free OpenAI Models
     "gpt-4o-mini": { provider: "openai", modelName: "gpt-4o-mini", requiresPayment: false },
     "gpt-3.5-turbo": { provider: "openai", modelName: "gpt-3.5-turbo", requiresPayment: false },
-    "gemini-1.5-flash": { provider: "gemini", modelName: "gemini-1.5-flash", requiresPayment: false },
-    "gemini-1.5-pro": { provider: "gemini", modelName: "gemini-1.5-pro", requiresPayment: false },
-    "llama-3.3-70b-versatile": { provider: "groq", modelName: "llama-3.3-70b-versatile", requiresPayment: true },
-    "llama-3.1-8b-instant": { provider: "groq", modelName: "llama-3.1-8b-instant", requiresPayment: true },
+
+    // Gemini Free Models (Auto, Low, Medium, High tiers)
+    "Gemini Auto": { provider: "gemini", modelName: "gemini-2.5-flash", temperature: 0.7, requiresPayment: false },
+    "Gemini Low": { provider: "gemini", modelName: "gemini-2.5-flash", temperature: 0.2, requiresPayment: false },
+    "Gemini Medium": { provider: "gemini", modelName: "gemini-2.5-flash", temperature: 0.7, requiresPayment: false },
+    "Gemini High": { provider: "gemini", modelName: "gemini-2.5-pro", temperature: 1.0, requiresPayment: false },
+
+    // Free Groq Models (Non-Llama)
     "mixtral-8x7b-32768": { provider: "groq", modelName: "mixtral-8x7b-32768", requiresPayment: false },
-    "gemma2-9b-it": { provider: "groq", modelName: "gemma2-9b-it", requiresPayment: false }
+    "gemma2-9b-it": { provider: "groq", modelName: "gemma2-9b-it", requiresPayment: false },
+
+    // Llama Models (Require R500 Fee)
+    "llama-3.3-70b-versatile": { provider: "groq", modelName: "llama-3.3-70b-versatile", requiresPayment: true },
+    "llama-3.1-8b-instant": { provider: "groq", modelName: "llama-3.1-8b-instant", requiresPayment: true }
 };
 
 app.get('/api/models', (req, res) => {
@@ -240,9 +250,12 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
             }));
             geminiContents.push({ role: 'user', parts: [{ text: finalPrompt }] });
 
-            // Using stable v1 endpoint to fix v1beta model not found error
-            const geminiResponse = await axios.post(`https://generativelanguage.googleapis.com/v1/models/${modelConfig.modelName}:generateContent?key=${GEMINI_API_KEY}`, {
-                contents: geminiContents
+            // Using v1beta endpoint to fully support Gemini models without errors
+            const geminiResponse = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/${modelConfig.modelName}:generateContent?key=${GEMINI_API_KEY}`, {
+                contents: geminiContents,
+                generationConfig: {
+                    temperature: modelConfig.temperature || 0.7
+                }
             }, {
                 headers: { 'Content-Type': 'application/json' }
             });
