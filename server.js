@@ -1,6 +1,6 @@
 /**
  * L3 AI Advanced Backend Server
- * Features: Authentication, Multi-Model Routing (L3 + Gemini + Groq), Google Web Search, File Reading, & Perpetual Learning.
+ * Features: Authentication, R500 Llama Payment Gate, Gemini v1 Stable Endpoint, OpenAI, Groq, & L3 Search.
  */
 
 const express = require('express');
@@ -15,26 +15,22 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware configuration
 app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Multer setup for handling document and file uploads in memory
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Environment Secrets loaded securely from Render .env configuration
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GOOGLE_SEARCH_API_KEY = process.env.GOOGLE_SEARCH_API_KEY;
 const GOOGLE_SEARCH_CX = process.env.GOOGLE_SEARCH_CX || "YOUR_CX_ID";
 
-// Persistent Data Stores
 const USERS_STORE_PATH = path.join(__dirname, 'users_store.json');
 const LEARNING_LOG_PATH = path.join(__dirname, 'l3_knowledge_store.json');
 
-// --- AUTHENTICATION HELPERS ---
 function getUsers() {
     try {
         if (fs.existsSync(USERS_STORE_PATH)) {
@@ -50,7 +46,6 @@ function saveUsers(users) {
     fs.writeFileSync(USERS_STORE_PATH, JSON.stringify(users, null, 2));
 }
 
-// --- L3 PERPETUAL LEARNING CORE ("Learn Forever") ---
 function recordL3LearningExperience(prompt, response, modelUsed) {
     try {
         let history = [];
@@ -72,7 +67,6 @@ function recordL3LearningExperience(prompt, response, modelUsed) {
     }
 }
 
-// --- GOOGLE CUSTOM SEARCH HELPER ---
 async function searchGoogle(query) {
     if (!GOOGLE_SEARCH_API_KEY) {
         return "Search API key not configured in environment variables.";
@@ -90,25 +84,19 @@ async function searchGoogle(query) {
     }
 }
 
-// --- MODEL REGISTRY ---
+// Model Registry with R500 charge flag for Llama models
 const MODEL_REGISTRY = {
-    // L3 Dedicated Neural & Special Engines
-    "L3 Core Neural": { provider: "groq", modelName: "openai/gpt-oss-120b" },
-    "L3 Web Search Pro": { provider: "l3-search", modelName: "openai/gpt-oss-120b" },
-    "L3 Auto-Trainer": { provider: "l3-trainer", modelName: "internal" },
-
-    // Free Google Gemini Models
-    "gemini-1.5-flash": { provider: "gemini", modelName: "gemini-1.5-flash" },
-    "gemini-1.5-pro": { provider: "gemini", modelName: "gemini-1.5-pro" },
-
-    // Free Groq Models
-    "llama-3.3-70b-versatile": { provider: "groq", modelName: "llama-3.3-70b-versatile" },
-    "llama-3.1-8b-instant": { provider: "groq", modelName: "llama-3.1-8b-instant" },
-    "mixtral-8x7b-32768": { provider: "groq", modelName: "mixtral-8x7b-32768" },
-    "gemma2-9b-it": { provider: "groq", modelName: "gemma2-9b-it" }
+    "L3 AI (Google Search Pro)": { provider: "l3-search", modelName: "gpt-4o-mini", requiresPayment: false },
+    "gpt-4o-mini": { provider: "openai", modelName: "gpt-4o-mini", requiresPayment: false },
+    "gpt-3.5-turbo": { provider: "openai", modelName: "gpt-3.5-turbo", requiresPayment: false },
+    "gemini-1.5-flash": { provider: "gemini", modelName: "gemini-1.5-flash", requiresPayment: false },
+    "gemini-1.5-pro": { provider: "gemini", modelName: "gemini-1.5-pro", requiresPayment: false },
+    "llama-3.3-70b-versatile": { provider: "groq", modelName: "llama-3.3-70b-versatile", requiresPayment: true },
+    "llama-3.1-8b-instant": { provider: "groq", modelName: "llama-3.1-8b-instant", requiresPayment: true },
+    "mixtral-8x7b-32768": { provider: "groq", modelName: "mixtral-8x7b-32768", requiresPayment: false },
+    "gemma2-9b-it": { provider: "groq", modelName: "gemma2-9b-it", requiresPayment: false }
 };
 
-// Endpoint: Get Available Models
 app.get('/api/models', (req, res) => {
     res.json({
         success: true,
@@ -117,7 +105,6 @@ app.get('/api/models', (req, res) => {
     });
 });
 
-// --- AUTHENTICATION ENDPOINTS ---
 app.post('/api/signup', (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) {
@@ -127,7 +114,7 @@ app.post('/api/signup', (req, res) => {
     if (users[username]) {
         return res.status(400).json({ success: false, error: "Username already exists. Please login." });
     }
-    users[username] = { password, createdAt: new Date().toISOString() };
+    users[username] = { password, hasPaidLlama: false, createdAt: new Date().toISOString() };
     saveUsers(users);
     res.json({ success: true, message: "Account created successfully. You can now log in." });
 });
@@ -141,15 +128,28 @@ app.post('/api/login', (req, res) => {
     if (!users[username] || users[username].password !== password) {
         return res.status(401).json({ success: false, error: "Invalid username or password." });
     }
-    res.json({ success: true, message: "Login successful.", username });
+    res.json({ success: true, message: "Login successful.", username, hasPaidLlama: users[username].hasPaidLlama || false });
 });
 
-// --- MAIN CHAT & PROCESSING ENGINE (With File Reader & Authentication Check) ---
+// Endpoint to process R500 payment for Llama models
+app.post('/api/pay-llama', (req, res) => {
+    const { username } = req.body;
+    if (!username) {
+        return res.status(400).json({ success: false, error: "Username is required." });
+    }
+    const users = getUsers();
+    if (!users[username]) {
+        return res.status(404).json({ success: false, error: "User not found." });
+    }
+    users[username].hasPaidLlama = true;
+    saveUsers(users);
+    res.json({ success: true, message: "R500 payment successful! Llama models unlocked.", hasPaidLlama: true });
+});
+
 app.post('/api/chat', upload.single('file'), async (req, res) => {
     try {
         const { username, model, prompt, history } = req.body;
 
-        // Mandatory Authentication Check
         if (!username) {
             return res.status(401).json({ success: false, error: "Unauthorized. Please sign up and log in first." });
         }
@@ -158,12 +158,21 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
             return res.status(401).json({ success: false, error: "Invalid user session. Please re-authenticate." });
         }
 
+        const selectedModelKey = MODEL_REGISTRY[model] ? model : "L3 AI (Google Search Pro)";
+        const modelConfig = MODEL_REGISTRY[selectedModelKey];
+
+        // Check if model requires R500 payment
+        if (modelConfig.requiresPayment && !users[username].hasPaidLlama) {
+            return res.status(403).json({ 
+                success: false, 
+                requiresPayment: true,
+                error: "Access Denied: You must pay an R500 fee to use Llama models." 
+            });
+        }
+
         if (!prompt && !req.file) {
             return res.status(400).json({ success: false, error: "Prompt or attached file is required." });
         }
-
-        const selectedModelKey = MODEL_REGISTRY[model] ? model : "L3 Core Neural";
-        const modelConfig = MODEL_REGISTRY[selectedModelKey];
         
         let parsedHistory = [];
         try {
@@ -172,7 +181,6 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
             parsedHistory = [];
         }
 
-        // Handle File Reading / Attachment Content Extraction
         let fileContext = "";
         if (req.file) {
             const fileBuffer = req.file.buffer;
@@ -189,42 +197,36 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
         const finalPrompt = (prompt || "") + fileContext;
         let reply = "";
 
-        // --- MODEL PROVIDER ROUTING ---
-        if (modelConfig.provider === "l3-trainer") {
-            reply = `**[L3 AI Auto-Trainer Engine Active]**\n\nPrompt and attached document vectors successfully evaluated, weights optimized with 99.4% precision, and synchronized with the perpetual learning matrix for: *'${prompt || "File attachment review"}'*.`;
-        
-        } else if (modelConfig.provider === "l3-search") {
+        if (modelConfig.provider === "l3-search") {
             const searchContext = await searchGoogle(prompt || "Review attached document");
             const enhancedPrompt = `Context retrieved from Google Search:\n${searchContext}\n\nUser Query: ${finalPrompt}`;
             
-            const groqResponse = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+            const openaiResponse = await axios.post('https://api.openai.com/v1/chat/completions', {
                 model: modelConfig.modelName,
-                messages: [
-                    ...parsedHistory,
-                    { role: "user", content: enhancedPrompt }
-                ],
+                messages: [...parsedHistory, { role: "user", content: enhancedPrompt }],
                 temperature: 0.7
             }, {
-                headers: {
-                    'Authorization': `Bearer ${GROQ_API_KEY}`,
-                    'Content-Type': 'application/json'
-                }
+                headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' }
             });
-            reply = groqResponse.data.choices[0].message.content;
+            reply = openaiResponse.data.choices[0].message.content;
+
+        } else if (modelConfig.provider === "openai") {
+            const openaiResponse = await axios.post('https://api.openai.com/v1/chat/completions', {
+                model: modelConfig.modelName,
+                messages: [...parsedHistory, { role: "user", content: finalPrompt }],
+                temperature: 0.7
+            }, {
+                headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' }
+            });
+            reply = openaiResponse.data.choices[0].message.content;
 
         } else if (modelConfig.provider === "groq") {
             const groqResponse = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
                 model: modelConfig.modelName,
-                messages: [
-                    ...parsedHistory,
-                    { role: "user", content: finalPrompt }
-                ],
+                messages: [...parsedHistory, { role: "user", content: finalPrompt }],
                 temperature: 0.7
             }, {
-                headers: {
-                    'Authorization': `Bearer ${GROQ_API_KEY}`,
-                    'Content-Type': 'application/json'
-                }
+                headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' }
             });
             reply = groqResponse.data.choices[0].message.content;
 
@@ -232,14 +234,14 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
             if (!GEMINI_API_KEY) {
                 return res.status(500).json({ success: false, error: "GEMINI_API_KEY is not configured in environment variables." });
             }
-            // Format history for Google Generative Language API
             const geminiContents = parsedHistory.map(h => ({
                 role: h.role === 'assistant' ? 'model' : 'user',
                 parts: [{ text: h.content }]
             }));
             geminiContents.push({ role: 'user', parts: [{ text: finalPrompt }] });
 
-            const geminiResponse = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/${modelConfig.modelName}:generateContent?key=${GEMINI_API_KEY}`, {
+            // Using stable v1 endpoint to fix v1beta model not found error
+            const geminiResponse = await axios.post(`https://generativelanguage.googleapis.com/v1/models/${modelConfig.modelName}:generateContent?key=${GEMINI_API_KEY}`, {
                 contents: geminiContents
             }, {
                 headers: { 'Content-Type': 'application/json' }
@@ -252,7 +254,6 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
             }
         }
 
-        // Record interaction in L3 AI's perpetual learning storage matrix
         recordL3LearningExperience(finalPrompt, reply, selectedModelKey);
 
         res.json({
@@ -271,9 +272,8 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
     }
 });
 
-// Health check endpoint
 app.get('/health', (req, res) => {
-    res.status(200).json({ status: "Online", service: "L3 AI Node Server, Authentication & Multi-Model Engine" });
+    res.status(200).json({ status: "Online", service: "L3 AI Node Server, Authentication & Model Suite" });
 });
 
 app.listen(PORT, () => {
