@@ -1,7 +1,6 @@
 /**
- * L3 AI Dedicated Search Server
- * Powered strictly and exclusively by the Google Custom Search API.
- * Contains no external AI APIs (No OpenAI, No Gemini, No Groq).
+ * L3 AI Google Search Engine Server
+ * Powered entirely by the Google Custom Search API with 3 thinking levels.
  */
 
 const express = require('express');
@@ -23,9 +22,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Pure Google Search API Credentials loaded from Render .env
+// Google Search API Credentials loaded from Render environment variables
 const GOOGLE_SEARCH_API_KEY = process.env.GOOGLE_SEARCH_API_KEY;
-const GOOGLE_SEARCH_CX = process.env.GOOGLE_SEARCH_CX || "YOUR_CX_ID";
+const GOOGLE_SEARCH_CX = process.env.GOOGLE_SEARCH_CX || "722dd2ab554b54b35";
 
 const USERS_STORE_PATH = path.join(__dirname, 'users_store.json');
 const LEARNING_LOG_PATH = path.join(__dirname, 'l3_knowledge_store.json');
@@ -201,7 +200,7 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
 
         const searchQuery = prompt || "Information synthesis";
 
-        // Execute Google Search Directly
+        // Execute direct Google Custom Search
         const searchResults = await performGoogleSearch(searchQuery, modelConfig.resultLimit);
 
         // Format and structure response strictly from Google Search results
@@ -217,10 +216,11 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Backend Processing Error:", error.message);
+        const detailedError = error.response?.data?.error?.message || error.message;
+        console.error("Backend Processing Error Details:", error.response?.data || error.message);
         res.status(500).json({
             success: false,
-            error: error.message || "Google Search processing error."
+            error: `Google Search Error: ${detailedError}`
         });
     }
 });
