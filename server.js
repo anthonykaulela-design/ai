@@ -1,6 +1,6 @@
 /**
  * L3 AI Advanced Backend Server
- * Features: Authentication, R500 Llama Payment Gate, Gemini v1beta (Auto, Low, Medium, High), OpenAI, Groq, & L3 Search.
+ * Models: L3 AI low thinking, L3 AI medium thinking, L3 AI High thinking (All powered by Google Search API)
  */
 
 const express = require('express');
@@ -23,8 +23,6 @@ app.use(express.static(path.join(__dirname, 'public')));
 const upload = multer({ storage: multer.memoryStorage() });
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const GROQ_API_KEY = process.env.GROQ_API_KEY;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GOOGLE_SEARCH_API_KEY = process.env.GOOGLE_SEARCH_API_KEY;
 const GOOGLE_SEARCH_CX = process.env.GOOGLE_SEARCH_CX || "YOUR_CX_ID";
 
@@ -75,7 +73,7 @@ async function searchGoogle(query) {
         const url = `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_SEARCH_API_KEY}&cx=${GOOGLE_SEARCH_CX}&q=${encodeURIComponent(query)}`;
         const response = await axios.get(url);
         if (response.data && response.data.items) {
-            return response.data.items.slice(0, 4).map(item => `${item.title}: ${item.snippet}`).join("\n");
+            return response.data.items.slice(0, 5).map(item => `${item.title}: ${item.snippet}`).join("\n");
         }
         return `Real-time search completed for: '${query}'.`;
     } catch (error) {
@@ -84,27 +82,23 @@ async function searchGoogle(query) {
     }
 }
 
-// Precise Model Registry including Gemini Auto/Low/Medium/High & R500 Llama gate
+// Exactly 3 models requested, all utilizing Google Search API with varying thinking depths
 const MODEL_REGISTRY = {
-    "L3 AI (Google Search Pro)": { provider: "l3-search", modelName: "gpt-4o-mini", requiresPayment: false },
-    
-    // Free OpenAI Models
-    "gpt-4o-mini": { provider: "openai", modelName: "gpt-4o-mini", requiresPayment: false },
-    "gpt-3.5-turbo": { provider: "openai", modelName: "gpt-3.5-turbo", requiresPayment: false },
-
-    // Gemini Free Models (Auto, Low, Medium, High tiers)
-    "Gemini Auto": { provider: "gemini", modelName: "gemini-2.5-flash", temperature: 0.7, requiresPayment: false },
-    "Gemini Low": { provider: "gemini", modelName: "gemini-2.5-flash", temperature: 0.2, requiresPayment: false },
-    "Gemini Medium": { provider: "gemini", modelName: "gemini-2.5-flash", temperature: 0.7, requiresPayment: false },
-    "Gemini High": { provider: "gemini", modelName: "gemini-2.5-pro", temperature: 1.0, requiresPayment: false },
-
-    // Free Groq Models (Non-Llama)
-    "mixtral-8x7b-32768": { provider: "groq", modelName: "mixtral-8x7b-32768", requiresPayment: false },
-    "gemma2-9b-it": { provider: "groq", modelName: "gemma2-9b-it", requiresPayment: false },
-
-    // Llama Models (Require R500 Fee)
-    "llama-3.3-70b-versatile": { provider: "groq", modelName: "llama-3.3-70b-versatile", requiresPayment: true },
-    "llama-3.1-8b-instant": { provider: "groq", modelName: "llama-3.1-8b-instant", requiresPayment: true }
+    "L3 AI low thinking": { 
+        thinkingLevel: "low", 
+        temperature: 0.2, 
+        systemPrompt: "Provide direct, concise, and straight-to-the-point answers with minimal fluff." 
+    },
+    "L3 AI medium thinking": { 
+        thinkingLevel: "medium", 
+        temperature: 0.7, 
+        systemPrompt: "Provide a balanced, structured, and comprehensive answer with clear context." 
+    },
+    "L3 AI High thinking": { 
+        thinkingLevel: "high", 
+        temperature: 1.0, 
+        systemPrompt: "Perform deep analytical reasoning, explore edge cases, evaluate multiple perspectives, and provide a highly detailed, thorough response." 
+    }
 };
 
 app.get('/api/models', (req, res) => {
@@ -124,7 +118,7 @@ app.post('/api/signup', (req, res) => {
     if (users[username]) {
         return res.status(400).json({ success: false, error: "Username already exists. Please login." });
     }
-    users[username] = { password, hasPaidLlama: false, createdAt: new Date().toISOString() };
+    users[username] = { password, createdAt: new Date().toISOString() };
     saveUsers(users);
     res.json({ success: true, message: "Account created successfully. You can now log in." });
 });
@@ -138,22 +132,7 @@ app.post('/api/login', (req, res) => {
     if (!users[username] || users[username].password !== password) {
         return res.status(401).json({ success: false, error: "Invalid username or password." });
     }
-    res.json({ success: true, message: "Login successful.", username, hasPaidLlama: users[username].hasPaidLlama || false });
-});
-
-// Endpoint to process R500 payment for Llama models
-app.post('/api/pay-llama', (req, res) => {
-    const { username } = req.body;
-    if (!username) {
-        return res.status(400).json({ success: false, error: "Username is required." });
-    }
-    const users = getUsers();
-    if (!users[username]) {
-        return res.status(404).json({ success: false, error: "User not found." });
-    }
-    users[username].hasPaidLlama = true;
-    saveUsers(users);
-    res.json({ success: true, message: "R500 payment successful! Llama models unlocked.", hasPaidLlama: true });
+    res.json({ success: true, message: "Login successful.", username });
 });
 
 app.post('/api/chat', upload.single('file'), async (req, res) => {
@@ -168,21 +147,12 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
             return res.status(401).json({ success: false, error: "Invalid user session. Please re-authenticate." });
         }
 
-        const selectedModelKey = MODEL_REGISTRY[model] ? model : "L3 AI (Google Search Pro)";
-        const modelConfig = MODEL_REGISTRY[selectedModelKey];
-
-        // Check if model requires R500 payment
-        if (modelConfig.requiresPayment && !users[username].hasPaidLlama) {
-            return res.status(403).json({ 
-                success: false, 
-                requiresPayment: true,
-                error: "Access Denied: You must pay an R500 fee to use Llama models." 
-            });
-        }
-
         if (!prompt && !req.file) {
             return res.status(400).json({ success: false, error: "Prompt or attached file is required." });
         }
+
+        const selectedModelKey = MODEL_REGISTRY[model] ? model : "L3 AI medium thinking";
+        const modelConfig = MODEL_REGISTRY[selectedModelKey];
         
         let parsedHistory = [];
         try {
@@ -204,70 +174,30 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
             }
         }
 
-        const finalPrompt = (prompt || "") + fileContext;
-        let reply = "";
+        const rawUserQuery = (prompt || "") + fileContext;
 
-        if (modelConfig.provider === "l3-search") {
-            const searchContext = await searchGoogle(prompt || "Review attached document");
-            const enhancedPrompt = `Context retrieved from Google Search:\n${searchContext}\n\nUser Query: ${finalPrompt}`;
-            
-            const openaiResponse = await axios.post('https://api.openai.com/v1/chat/completions', {
-                model: modelConfig.modelName,
-                messages: [...parsedHistory, { role: "user", content: enhancedPrompt }],
-                temperature: 0.7
-            }, {
-                headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' }
-            });
-            reply = openaiResponse.data.choices[0].message.content;
+        // ALL models use Google Search API as requested
+        const searchContext = await searchGoogle(prompt || "Review attached document");
+        const enhancedPrompt = `[Google Search Context]:\n${searchContext}\n\n[Thinking Directive]: ${modelConfig.systemPrompt}\n\n[User Query]: ${rawUserQuery}`;
 
-        } else if (modelConfig.provider === "openai") {
-            const openaiResponse = await axios.post('https://api.openai.com/v1/chat/completions', {
-                model: modelConfig.modelName,
-                messages: [...parsedHistory, { role: "user", content: finalPrompt }],
-                temperature: 0.7
-            }, {
-                headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' }
-            });
-            reply = openaiResponse.data.choices[0].message.content;
-
-        } else if (modelConfig.provider === "groq") {
-            const groqResponse = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
-                model: modelConfig.modelName,
-                messages: [...parsedHistory, { role: "user", content: finalPrompt }],
-                temperature: 0.7
-            }, {
-                headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' }
-            });
-            reply = groqResponse.data.choices[0].message.content;
-
-        } else if (modelConfig.provider === "gemini") {
-            if (!GEMINI_API_KEY) {
-                return res.status(500).json({ success: false, error: "GEMINI_API_KEY is not configured in environment variables." });
+        const openaiResponse = await axios.post('https://api.openai.com/v1/chat/completions', {
+            model: "gpt-4o-mini",
+            messages: [
+                ...parsedHistory,
+                { role: "user", content: enhancedPrompt }
+            ],
+            temperature: modelConfig.temperature
+        }, {
+            headers: {
+                'Authorization': `Bearer ${OPENAI_API_KEY}`,
+                'Content-Type': 'application/json'
             }
-            const geminiContents = parsedHistory.map(h => ({
-                role: h.role === 'assistant' ? 'model' : 'user',
-                parts: [{ text: h.content }]
-            }));
-            geminiContents.push({ role: 'user', parts: [{ text: finalPrompt }] });
+        });
 
-            // Using v1beta endpoint to fully support Gemini models without errors
-            const geminiResponse = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/${modelConfig.modelName}:generateContent?key=${GEMINI_API_KEY}`, {
-                contents: geminiContents,
-                generationConfig: {
-                    temperature: modelConfig.temperature || 0.7
-                }
-            }, {
-                headers: { 'Content-Type': 'application/json' }
-            });
+        const reply = openaiResponse.data.choices[0].message.content;
 
-            if (geminiResponse.data && geminiResponse.data.candidates && geminiResponse.data.candidates[0].content) {
-                reply = geminiResponse.data.candidates[0].content.parts[0].text;
-            } else {
-                reply = "Gemini model completed request successfully.";
-            }
-        }
-
-        recordL3LearningExperience(finalPrompt, reply, selectedModelKey);
+        // Record interaction in L3 AI's perpetual learning storage matrix
+        recordL3LearningExperience(rawUserQuery, reply, selectedModelKey);
 
         res.json({
             success: true,
@@ -286,7 +216,7 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-    res.status(200).json({ status: "Online", service: "L3 AI Node Server, Authentication & Model Suite" });
+    res.status(200).json({ status: "Online", service: "L3 AI Node Server - Thinking Engine Suite" });
 });
 
 app.listen(PORT, () => {
