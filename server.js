@@ -1,6 +1,5 @@
 /**
- * L3 AI Google Search Engine Server
- * Powered entirely by the Google Custom Search API with 3 thinking levels.
+ * L3 AI Backend Server with Google Search & Studocu MCP Integration
  */
 
 const express = require('express');
@@ -22,9 +21,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Google Search API Credentials loaded from Render environment variables
 const GOOGLE_SEARCH_API_KEY = process.env.GOOGLE_SEARCH_API_KEY;
 const GOOGLE_SEARCH_CX = process.env.GOOGLE_SEARCH_CX || "722dd2ab554b54b35";
+const STUDOCU_MCP_URL = "https://agent-os-mcp.alpha.studocu.com/mcp";
 
 const USERS_STORE_PATH = path.join(__dirname, 'users_store.json');
 const LEARNING_LOG_PATH = path.join(__dirname, 'l3_knowledge_store.json');
@@ -65,68 +64,95 @@ function recordL3LearningExperience(prompt, response, modelUsed) {
     }
 }
 
-// Google Custom Search Core Fetcher
+// Google Custom Search Fetcher
 async function performGoogleSearch(query, resultCount = 5) {
-    if (!GOOGLE_SEARCH_API_KEY) {
-        throw new Error("GOOGLE_SEARCH_API_KEY is missing in your .env configuration.");
-    }
-    const url = `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_SEARCH_API_KEY}&cx=${GOOGLE_SEARCH_CX}&q=${encodeURIComponent(query)}`;
-    const response = await axios.get(url);
-    if (response.data && response.data.items) {
-        return response.data.items.slice(0, resultCount).map(item => ({
-            title: item.title,
-            snippet: item.snippet,
-            link: item.link
-        }));
+    if (!GOOGLE_SEARCH_API_KEY) return [];
+    try {
+        const url = `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_SEARCH_API_KEY}&cx=${GOOGLE_SEARCH_CX}&q=${encodeURIComponent(query)}`;
+        const response = await axios.get(url);
+        if (response.data && response.data.items) {
+            return response.data.items.slice(0, resultCount).map(item => ({
+                title: item.title,
+                snippet: item.snippet,
+                link: item.link
+            }));
+        }
+    } catch (err) {
+        console.error("Google Search API Error:", err.message);
     }
     return [];
 }
 
-// Exclusive 3-Model Registry (Google Search API Powered)
+// Studocu MCP Tool Query Fetcher
+async function queryStudocuMCP(query) {
+    try {
+        const response = await axios.post(STUDOCU_MCP_URL, {
+            jsonrpc: "2.0",
+            method: "tools/call",
+            params: {
+                name: "search-documents",
+                arguments: { query: query }
+            },
+            id: 1
+        }, {
+            headers: { 
+                'Content-Type': 'application/json', 
+                'Accept': 'application/json, text/event-stream' 
+            },
+            timeout: 8000
+        });
+        if (response.data && response.data.result) {
+            return response.data.result;
+        }
+    } catch (err) {
+        console.error("Studocu MCP Query Notice:", err.message);
+    }
+    return null;
+}
+
+// 3 Thinking Levels Model Registry
 const MODEL_REGISTRY = {
     "L3 AI low thinking": {
-        depth: "low",
         resultLimit: 3,
-        formatResponse: (query, results, fileText) => {
-            if (results.length === 0) return `No immediate search results found for: **${query}**.`;
-            let response = `### **${results[0].title}**\n${results[0].snippet}\n\n*Source:* [${results[0].link}](${results[0].link})\n`;
-            if (results[1]) {
-                response += `\n**Key Takeaway:** ${results[1].snippet}`;
+        formatResponse: (query, searchResults, studocuData, fileText) => {
+            let response = `### L3 AI Low Thinking Synthesis\n\n`;
+            if (searchResults.length > 0) {
+                response += `**Web Source:** [${searchResults[0].title}](${searchResults[0].link})\n${searchResults[0].snippet}\n\n`;
             }
-            if (fileText) response += `\n\n**File Notes:** ${fileText.substring(0, 300)}...`;
-            return response;
+            if (studocuData) {
+                response += `**Studocu Study Asset Found:**\n\`\`\`json\n${JSON.stringify(studocuData, null, 2).substring(0, 400)}\n\`\`\`\n\n`;
+            }
+            if (fileText) response += `**File Notes:** ${fileText.substring(0, 250)}...\n`;
+            return response || `Completed search for: ${query}`;
         }
     },
     "L3 AI medium thinking": {
-        depth: "medium",
         resultLimit: 5,
-        formatResponse: (query, results, fileText) => {
-            if (results.length === 0) return `No Google search results found for query: *${query}*.`;
-            let response = `### L3 AI Search Synthesis for "${query}"\n\n`;
-            results.forEach((item, idx) => {
+        formatResponse: (query, searchResults, studocuData, fileText) => {
+            let response = `### L3 AI Medium Thinking Synthesis for "${query}"\n\n`;
+            searchResults.forEach((item, idx) => {
                 response += `**${idx + 1}. ${item.title}**\n${item.snippet}\n*Link:* [${item.link}](${item.link})\n\n`;
             });
-            if (fileText) response += `---\n**Attached Document Summary:**\n${fileText.substring(0, 600)}\n\n`;
+            if (studocuData) {
+                response += `---\n**Studocu Library Integration:**\n\`\`\`json\n${JSON.stringify(studocuData, null, 2).substring(0, 800)}\n\`\`\`\n\n`;
+            }
+            if (fileText) response += `---\n**Attached Document Summary:**\n${fileText.substring(0, 500)}\n\n`;
             return response;
         }
     },
     "L3 AI High thinking": {
-        depth: "high",
         resultLimit: 8,
-        formatResponse: (query, results, fileText) => {
-            if (results.length === 0) return `Deep analysis could not retrieve real-time search data for: *${query}*.`;
-            let response = `## Deep Analytical Search Matrix: "${query}"\n\n`;
-            response += `### Primary Findings & Real-Time Context:\n`;
-            results.forEach((item, idx) => {
-                response += `#### ${idx + 1}. ${item.title}\n`;
-                response += `> ${item.snippet}\n\n`;
-                response += `**Reference:** [${item.link}](${item.link})\n\n`;
+        formatResponse: (query, searchResults, studocuData, fileText) => {
+            let response = `## L3 AI High Thinking Deep Analysis Matrix: "${query}"\n\n`;
+            response += `### Web Indices & Context:\n`;
+            searchResults.forEach((item, idx) => {
+                response += `#### ${idx + 1}. ${item.title}\n> ${item.snippet}\n**Ref:** [${item.link}](${item.link})\n\n`;
             });
-            response += `---\n### Evaluated Search Insights:\n`;
-            response += `- **Result Count Processed:** ${results.length} web indices.\n`;
-            response += `- **Relevance Index:** High structural correlation with user intent.\n`;
+            if (studocuData) {
+                response += `### Studocu Academic Repository Data:\n\`\`\`json\n${JSON.stringify(studocuData, null, 2)}\n\`\`\`\n\n`;
+            }
             if (fileText) {
-                response += `\n### Extended File Analysis:\n\`\`\`text\n${fileText.substring(0, 1000)}\n\`\`\`\n`;
+                response += `### Attached File Detailed Analysis:\n\`\`\`text\n${fileText.substring(0, 1000)}\n\`\`\`\n`;
             }
             return response;
         }
@@ -134,35 +160,24 @@ const MODEL_REGISTRY = {
 };
 
 app.get('/api/models', (req, res) => {
-    res.json({
-        success: true,
-        models: Object.keys(MODEL_REGISTRY),
-        learningEngineStatus: "Active - Pure Google Search Engine Mode"
-    });
+    res.json({ success: true, models: Object.keys(MODEL_REGISTRY) });
 });
 
 app.post('/api/signup', (req, res) => {
     const { username, password } = req.body;
-    if (!username || !password) {
-        return res.status(400).json({ success: false, error: "Username and password are required." });
-    }
+    if (!username || !password) return res.status(400).json({ success: false, error: "Username & password required." });
     const users = getUsers();
-    if (users[username]) {
-        return res.status(400).json({ success: false, error: "Username already exists. Please login." });
-    }
+    if (users[username]) return res.status(400).json({ success: false, error: "User already exists." });
     users[username] = { password, createdAt: new Date().toISOString() };
     saveUsers(users);
-    res.json({ success: true, message: "Account created successfully. You can now log in." });
+    res.json({ success: true, message: "Account created successfully." });
 });
 
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
-    if (!username || !password) {
-        return res.status(400).json({ success: false, error: "Username and password are required." });
-    }
     const users = getUsers();
     if (!users[username] || users[username].password !== password) {
-        return res.status(401).json({ success: false, error: "Invalid username or password." });
+        return res.status(401).json({ success: false, error: "Invalid credentials." });
     }
     res.json({ success: true, message: "Login successful.", username });
 });
@@ -170,63 +185,38 @@ app.post('/api/login', (req, res) => {
 app.post('/api/chat', upload.single('file'), async (req, res) => {
     try {
         const { username, model, prompt } = req.body;
+        if (!username) return res.status(401).json({ success: false, error: "Unauthorized." });
 
-        if (!username) {
-            return res.status(401).json({ success: false, error: "Unauthorized. Please sign up and log in first." });
-        }
-        const users = getUsers();
-        if (!users[username]) {
-            return res.status(401).json({ success: false, error: "Invalid user session. Please re-authenticate." });
-        }
-
-        if (!prompt && !req.file) {
-            return res.status(400).json({ success: false, error: "Prompt or attached file is required." });
-        }
-
-        const selectedModelKey = MODEL_REGISTRY[model] ? model : "L3 AI medium thinking";
-        const modelConfig = MODEL_REGISTRY[selectedModelKey];
+        const selectedModel = MODEL_REGISTRY[model] ? model : "L3 AI medium thinking";
+        const config = MODEL_REGISTRY[selectedModel];
 
         let fileText = "";
         if (req.file) {
-            const fileBuffer = req.file.buffer;
-            const fileName = req.file.originalname;
-            const mimeType = req.file.mimetype;
-            if (mimeType.includes("text") || fileName.endsWith(".txt") || fileName.endsWith(".md") || fileName.endsWith(".json") || fileName.endsWith(".js") || fileName.endsWith(".html")) {
-                fileText = fileBuffer.toString('utf8');
-            } else {
-                fileText = `File Attached: ${fileName} (${mimeType}, ${req.file.size} bytes)`;
-            }
+            fileText = req.file.buffer.toString('utf8');
         }
 
-        const searchQuery = prompt || "Information synthesis";
+        const searchQuery = prompt || "Academic search";
 
-        // Execute direct Google Custom Search
-        const searchResults = await performGoogleSearch(searchQuery, modelConfig.resultLimit);
+        // Fetch concurrently from Google Custom Search and Studocu MCP Server
+        const [searchResults, studocuData] = await Promise.all([
+            performGoogleSearch(searchQuery, config.resultLimit),
+            queryStudocuMCP(searchQuery)
+        ]);
 
-        // Format and structure response strictly from Google Search results
-        const reply = modelConfig.formatResponse(searchQuery, searchResults, fileText);
+        const reply = config.formatResponse(searchQuery, searchResults, studocuData, fileText);
 
-        recordL3LearningExperience(searchQuery, reply, selectedModelKey);
+        recordL3LearningExperience(searchQuery, reply, selectedModel);
 
-        res.json({
-            success: true,
-            modelUsed: selectedModelKey,
-            reply: reply,
-            learningState: "Saved to local knowledge store."
-        });
+        res.json({ success: true, modelUsed: selectedModel, reply });
 
-    } catch (error) {
-        const detailedError = error.response?.data?.error?.message || error.message;
-        console.error("Backend Processing Error Details:", error.response?.data || error.message);
-        res.status(500).json({
-            success: false,
-            error: `Google Search Error: ${detailedError}`
-        });
+    } catch (err) {
+        console.error("Backend Error:", err.message);
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
 app.get('/health', (req, res) => {
-    res.status(200).json({ status: "Online", service: "L3 AI Google Search Engine" });
+    res.status(200).json({ status: "Online", service: "L3 AI Search & Studocu MCP Integration" });
 });
 
 app.listen(PORT, () => {
