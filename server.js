@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
+const OpenAI = require('openai');
 require('dotenv').config();
 
 const app = express();
@@ -11,7 +12,24 @@ app.use(cors());
 app.use(express.json());
 
 // ==========================================
-// 1. TiDB Cloud Connection & Initialization
+// 1. NVIDIA NIM SDK Initialization
+// ==========================================
+const nvidiaApiKey = process.env.NVIDIA_API_KEY ? process.env.NVIDIA_API_KEY.trim() : "";
+const nvidiaBaseUrl = process.env.NVIDIA_BASE_URL || 'https://integrate.api.nvidia.com/v1';
+
+if (!nvidiaApiKey) {
+    console.warn("⚠️ WARNING: NVIDIA_API_KEY is not defined in environment variables!");
+} else {
+    console.log("⚡ NVIDIA NIM Inference Client initialized successfully.");
+}
+
+const nvidiaClient = new OpenAI({
+    apiKey: nvidiaApiKey,
+    baseURL: nvidiaBaseUrl
+});
+
+// ==========================================
+// 2. TiDB Cloud Connection & Database Setup
 // ==========================================
 let pool;
 try {
@@ -72,7 +90,7 @@ async function initializeDatabase() {
         `);
 
         connection.release();
-        console.log("✅ TiDB Cloud database tables initialized successfully.");
+        console.log("✅ TiDB Cloud tables verified and ready.");
     } catch (err) {
         console.error("⚠️ Database initialization notice:", err.message);
     }
@@ -81,7 +99,7 @@ async function initializeDatabase() {
 initializeDatabase();
 
 // ==========================================
-// 2. Authentication Endpoints
+// 3. User Authentication Endpoints
 // ==========================================
 app.post('/api/auth/register', async (req, res) => {
     try {
@@ -91,7 +109,7 @@ app.post('/api/auth/register', async (req, res) => {
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
-        const apiToken = "hf_" + Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
+        const apiToken = "nv_" + Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
 
         const [result] = await pool.query(
             "INSERT INTO users (name, email, password_hash, api_token) VALUES (?, ?, ?, ?)",
@@ -139,7 +157,7 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 // ==========================================
-// 3. APIaaS Chat Completions Endpoint
+// 4. APIaaS Chat Completions Endpoint (NVIDIA NIM)
 // ==========================================
 app.post('/v1/chat/completions', async (req, res) => {
     try {
@@ -148,43 +166,71 @@ app.post('/v1/chat/completions', async (req, res) => {
             return res.status(400).json({ error: "Invalid request format. Messages array required." });
         }
 
-        const latestMessage = messages[messages.length - 1].content || "";
-        const lowerQuery = latestMessage.toLowerCase();
-        console.log(`[L3 Sovereign Core] Processing query under tier [${tier || 'standard'}]: ${latestMessage}`);
+        // Configure Model & Depth parameters based on tier selection
+        let selectedModel = "nvidia/nemotron-3.5-super-vl-120b-a12b"; // Default high performance model
+        let maxTokens = 4096;
+        let reasoningInstruction = "Provide thorough, multi-layered technical breakdown with complete structural detail.";
 
-        let replyContent = "";
+        switch (tier) {
+            case 'research-low':
+                selectedModel = "meta/llama-3.1-70b-instruct";
+                maxTokens = 1024;
+                reasoningInstruction = "Provide clear, concise research analysis.";
+                break;
+            case 'research-medium':
+                selectedModel = "meta/llama-3.1-70b-instruct";
+                maxTokens = 2048;
+                reasoningInstruction = "Provide balanced, structured multi-disciplinary research across legal frameworks, software design, and architecture.";
+                break;
+            case 'research-high':
+                selectedModel = "nvidia/nemotron-3.5-super-vl-120b-a12b";
+                maxTokens = 4096;
+                reasoningInstruction = "Provide exhaustive, highly granular academic and technical research with complete edge-case analysis.";
+                break;
+            case 'deep-research':
+            case 'master-high':
+                selectedModel = "nvidia/nemotron-3.5-super-vl-120b-a12b";
+                maxTokens = 8192;
+                reasoningInstruction = "Execute deep sovereign research synthesis with maximum depth, complete code listings, and legal/structural precision.";
+                break;
+        }
 
-        // Dynamic knowledge routing matching common inquiries
-        if (lowerQuery.includes('what is ai') || lowerQuery.includes('artificial intelligence')) {
-            replyContent = `**Artificial Intelligence (AI)** refers to the simulation of human intelligence in machines programmed to think, learn, adapt, and solve complex problems. Under your **${tier || 'research'}** protocol, this encompasses machine learning algorithms, neural network processing, automated reasoning, and scalable software integrations.`;
-        } 
-        else if (lowerQuery.includes('llb') || lowerQuery.includes('what is an llb')) {
-            replyContent = `An **LLB (Legum Baccalaureus / Bachelor of Laws)** is the primary undergraduate degree required for practicing law. In jurisdictions like South Africa, it provides foundational instruction in constitutional law, contract law, criminal law, delict, and corporate legal frameworks.`;
-        }
-        else if (lowerQuery.includes('hello') || lowerQuery.includes('hi')) {
-            replyContent = "Greetings. L3 AI Master Sovereign Workspace node is online, connected to TiDB Cloud storage, and ready for your development, engineering, or legal research directives.";
-        } 
-        else {
-            // General fallback synthesis that directly addresses the user's prompt text contextually
-            replyContent = `[L3 Sovereign Intelligence Synthesis (${tier || 'standard-tier'})]: \n\nRegarding your inquiry: *"^^${latestMessage}^^"*\n\nAnalysis complete. The sovereign workspace engine has processed your context parameters through the TiDB cloud pipeline. You can request structural specifications, code generation modules, or legal framework comparisons for this topic at any time.`;
-        }
+        // Prepend System Instructions
+        const formattedMessages = [
+            { role: "system", content: `You are L3 AI Master Sovereign. ${reasoningInstruction}` },
+            ...messages
+        ];
+
+        console.log(`[NVIDIA NIM Engine] Dispatching request to [${selectedModel}] under tier [${tier || 'standard'}]...`);
+
+        // Execute inference request against NVIDIA NIM API Catalog
+        const completion = await nvidiaClient.chat.completions.create({
+            model: selectedModel,
+            messages: formattedMessages,
+            max_tokens: maxTokens,
+            temperature: 0.7,
+            top_p: 0.95
+        });
+
+        const aiReply = completion.choices?.[0]?.message?.content || "No response generated by NVIDIA NIM model.";
 
         res.json({
             choices: [{
                 message: {
                     role: "assistant",
-                    content: replyContent
+                    content: aiReply
                 }
             }]
         });
 
     } catch (error) {
-        console.error("Execution Exception:", error.message || error);
+        console.error("NVIDIA NIM Inference Exception:", error.message || error);
+
         res.json({
             choices: [{
                 message: {
                     role: "assistant",
-                    content: `[Sovereign Core Notice]: Exception caught during processing: ${error.message}`
+                    content: `[Sovereign Core Notice]: NVIDIA NIM Inference Error: ${error.message || "Failed to reach NVIDIA endpoint"}. Check your API key or model slug configuration.`
                 }
             }]
         });
@@ -193,13 +239,17 @@ app.post('/v1/chat/completions', async (req, res) => {
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-    res.json({ status: "active", system: "L3 Sovereign Backend Core" });
+    res.json({ 
+        status: "active", 
+        engine: "NVIDIA NIM Microservices Gateway",
+        targetHost: nvidiaBaseUrl 
+    });
 });
 
 // ==========================================
-// 4. Server Listener Startup
+// 5. Server Listener Startup
 // ==========================================
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-    console.log(`🚀 L3 AI Sovereign Backend active on port ${PORT}`);
+    console.log(`🚀 L3 AI Sovereign Backend running with NVIDIA NIM on port ${PORT}`);
 });
