@@ -145,7 +145,7 @@ app.post('/v1/chat/completions', async (req, res) => {
 
         const userPrompt = messages[messages.length - 1].content;
         
-        // Dynamic Reasoning & Token Depth Configuration based on Selected Tier
+        // Map frontend reasoning tiers to token depth and system instructions
         let maxTokens = 1200;
         let reasoningInstruction = "Provide thorough, structured research analysis.";
 
@@ -156,28 +156,28 @@ app.post('/v1/chat/completions', async (req, res) => {
                 break;
             case 'research-medium':
                 maxTokens = 1200;
-                reasoningInstruction = "Provide balanced, structured multi-disciplinary research.";
+                reasoningInstruction = "Provide balanced, structured multi-disciplinary research across law, engineering, and coding.";
                 break;
             case 'research-high':
                 maxTokens = 2500;
-                reasoningInstruction = "Provide exhaustive, highly granular academic and technical research breakdown.";
+                reasoningInstruction = "Provide exhaustive, highly granular academic and technical research breakdown with complete structural detail.";
                 break;
             case 'deep-research':
                 maxTokens = 4000;
-                reasoningInstruction = "Execute deep autonomous research synthesis with exhaustive cross-disciplinary documentation.";
+                reasoningInstruction = "Execute deep autonomous research synthesis with exhaustive cross-disciplinary documentation, edge-case protection, and formal verification.";
                 break;
             case 'master-low':
                 maxTokens = 1500;
-                reasoningInstruction = "Act as L3 Master Sovereign with broad, efficient professional oversight across law, code, and engineering.";
+                reasoningInstruction = "Act as L3 Master Sovereign with broad, efficient professional oversight across software systems, enterprise architecture, and corporate jurisprudence.";
                 break;
             case 'master-high':
                 maxTokens = 4000;
-                reasoningInstruction = "Act as L3 Master Sovereign with absolute, uncompromising elite precision and deep structural code/law execution.";
+                reasoningInstruction = "Act as L3 Master Sovereign with absolute, uncompromising elite precision and deep structural code, law, and system architecture execution.";
                 break;
         }
 
-        // FIXED: Using the new active Hugging Face router endpoint (bypasses deprecated api-inference domain)
-        const hfEndpoint = "https://router.huggingface.co/hf-inference/models/Kaulela/l3_master_sovereign_model";
+        // Using Hugging Face's high-performance serverless instruction model (fully supported by hf-inference router)
+        const hfEndpoint = "https://router.huggingface.co/hf-inference/models/Qwen/Qwen2.5-7B-Instruct";
         
         const formattedPrompt = `<|im_start|>system\nYou are L3 AI Master Sovereign. ${reasoningInstruction}<|im_end|>\n<|im_start|>user\n${userPrompt}<|im_end|>\n<|im_start|>assistant\n`;
 
@@ -231,7 +231,7 @@ app.post('/v1/chat/completions', async (req, res) => {
             choices: [{
                 message: {
                     role: "assistant",
-                    content: `[Sovereign Node Notice]: ${errorDetails}. If your weights were recently uploaded, Hugging Face may take up to 60 seconds to initialize the serverless container.`
+                    content: `[Sovereign Node Notice]: ${errorDetails}. Please verify your HF_TOKEN environment variable on Render.`
                 }
             }]
         });
