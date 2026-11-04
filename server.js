@@ -11,8 +11,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Initialize Hugging Face Inference SDK (automatically handles router domains)
-const hf = new HfInference(process.env.HF_TOKEN);
+// Sanitize and trim the token to prevent whitespace or newline corruption
+const cleanToken = process.env.HF_TOKEN ? process.env.HF_TOKEN.trim() : "";
+const hf = new HfInference(cleanToken);
 
 // ==========================================
 // 1. TiDB Cloud Connection & Initialization
@@ -177,13 +178,12 @@ app.post('/v1/chat/completions', async (req, res) => {
                 break;
         }
 
-        // Prepend system instructions to the chat history array for Qwen
         const fullMessages = [
             { role: "system", content: `You are L3 AI Master Sovereign. ${reasoningInstruction}` },
             ...messages
         ];
 
-        // Use official HF SDK chatCompletion method targeting a fully supported fast serverless model
+        // Use official SDK chatCompletion method targeting Qwen/Qwen2.5-7B-Instruct
         const response = await hf.chatCompletion({
             model: "Qwen/Qwen2.5-7B-Instruct",
             messages: fullMessages,
