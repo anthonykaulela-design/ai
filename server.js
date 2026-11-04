@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const { HfInference } = require('@huggingface/inference');
+const OpenAI = require('openai');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 require('dotenv').config();
@@ -11,9 +11,11 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Sanitize and trim the token to prevent whitespace or newline corruption
-const cleanToken = process.env.HF_TOKEN ? process.env.HF_TOKEN.trim() : "";
-const hf = new HfInference(cleanToken);
+// Initialize Hugging Face's modern OpenAI-compatible router client
+const hfClient = new OpenAI({
+    baseURL: "https://router.huggingface.co/v1",
+    apiKey: process.env.HF_TOKEN ? process.env.HF_TOKEN.trim() : ""
+});
 
 // ==========================================
 // 1. TiDB Cloud Connection & Initialization
@@ -183,15 +185,15 @@ app.post('/v1/chat/completions', async (req, res) => {
             ...messages
         ];
 
-        // Use official SDK chatCompletion method targeting Qwen/Qwen2.5-7B-Instruct
-        const response = await hf.chatCompletion({
-            model: "Qwen/Qwen2.5-7B-Instruct",
+        // Query Hugging Face's router using standard OpenAI-compatible client syntax
+        const completion = await hfClient.chat.completions.create({
+            model: "Qwen/Qwen2.5-7B-Instruct:fastest",
             messages: fullMessages,
             max_tokens: maxTokens,
             temperature: 0.7
         });
 
-        const aiReply = response.choices?.[0]?.message?.content || "No response generated.";
+        const aiReply = completion.choices?.[0]?.message?.content || "No response generated.";
 
         res.json({
             choices: [{
