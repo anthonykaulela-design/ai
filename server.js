@@ -19,7 +19,7 @@ const rawToken = process.env.HF_TOKEN ? process.env.HF_TOKEN.trim() : "";
 if (!rawToken) {
     console.error("⚠️ CRITICAL WARNING: HF_TOKEN is not defined in Render environment variables!");
 } else if (!rawToken.startsWith("hf_")) {
-    console.warn("⚠️ TOKEN FORMAT WARNING: HF_TOKEN does not start with 'hf_'. Check for improper formatting or missing prefixes.");
+    console.warn("⚠️ TOKEN FORMAT WARNING: HF_TOKEN does not start with 'hf_'. Check for improper formatting.");
 } else {
     console.log(`✅ HF_TOKEN detected: Prefix '${rawToken.substring(0, 5)}...' (Length: ${rawToken.length})`);
 }
@@ -168,13 +168,12 @@ app.post('/v1/chat/completions', async (req, res) => {
             return res.status(400).json({ error: "Invalid request format. Messages array required." });
         }
 
-        // Check if token exists before making request
         if (!rawToken) {
             return res.json({
                 choices: [{
                     message: {
                         role: "assistant",
-                        content: "[Sovereign Node Notice]: HF_TOKEN environment variable is not defined on Render. Please configure it in your Render Dashboard settings."
+                        content: "[Sovereign Node Notice]: HF_TOKEN environment variable is not defined on Render."
                     }
                 }]
             });
@@ -216,8 +215,8 @@ app.post('/v1/chat/completions', async (req, res) => {
             ...messages
         ];
 
-        // Primary supported Hugging Face serverless provider route
-        const modelTarget = process.env.L3_MODEL_TARGET || "Qwen/Qwen2.5-7B-Instruct:fastest";
+        // Using DeepSeek-R1 with :fastest auto-router routing tag
+        const modelTarget = process.env.L3_MODEL_TARGET || "deepseek-ai/DeepSeek-R1:fastest";
 
         const completion = await hfClient.chat.completions.create({
             model: modelTarget,
@@ -238,10 +237,13 @@ app.post('/v1/chat/completions', async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Inference Error:", error.status, error.message || error);
+        console.error("Inference Error Status:", error.status);
+        console.error("Inference Error Details:", error.message || error);
 
         let userNotice = error.message || "Inference failed";
-        if (error.status === 401) {
+        if (error.status === 400) {
+            userNotice = `Model Provider Error (400): ${error.message}. Ensure your account has enabled providers at https://hf.co/settings/inference-providers.`;
+        } else if (error.status === 401) {
             userNotice = "401 Unauthorized - Invalid HF_TOKEN. Ensure your token in Render Environment starts with 'hf_' and has Inference permissions.";
         }
 
