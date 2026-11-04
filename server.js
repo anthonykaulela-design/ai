@@ -29,11 +29,9 @@ const pool = mysql.createPool({
 async function initializeDatabase() {
     try {
         const connection = await pool.getConnection();
-        
-        // Ensure database selection
         await connection.query(`USE ${process.env.DB_NAME || 'l3_ai_db'};`);
 
-        // Create Users Table
+        // Users Table
         await connection.query(`
             CREATE TABLE IF NOT EXISTS users (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -45,7 +43,7 @@ async function initializeDatabase() {
             );
         `);
 
-        // Create Chat Sessions Table
+        // Chat Sessions Table
         await connection.query(`
             CREATE TABLE IF NOT EXISTS chat_sessions (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -56,7 +54,7 @@ async function initializeDatabase() {
             );
         `);
 
-        // Create Messages Table
+        // Messages Table
         await connection.query(`
             CREATE TABLE IF NOT EXISTS messages (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -69,7 +67,7 @@ async function initializeDatabase() {
         `);
 
         connection.release();
-        console.log("TiDB Cloud tables initialized and verified successfully.");
+        console.log("TiDB Cloud tables initialized successfully.");
     } catch (err) {
         console.error("Database initialization warning:", err.message);
     }
@@ -80,8 +78,6 @@ initializeDatabase();
 // ==========================================
 // 2. Authentication Endpoints
 // ==========================================
-
-// Register Route
 app.post('/api/auth/register', async (req, res) => {
     try {
         const { name, email, password } = req.body;
@@ -109,7 +105,6 @@ app.post('/api/auth/register', async (req, res) => {
     }
 });
 
-// Login Route
 app.post('/api/auth/login', async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -143,45 +138,72 @@ app.post('/api/auth/login', async (req, res) => {
 // ==========================================
 app.post('/v1/chat/completions', async (req, res) => {
     try {
-        const { messages, model } = req.body;
+        const { messages, tier } = req.body;
         if (!messages || !Array.isArray(messages) || messages.length === 0) {
             return res.status(400).json({ error: "Invalid request format. Messages array required." });
         }
 
         const userPrompt = messages[messages.length - 1].content;
         
-        // Determine target Hugging Face repository (defaults to master sovereign model)
-        let targetModelRepo = model || "Kaulela/l3_master_sovereign_model";
-        // If frontend passes a shorthand tier key, map it to the full repository path
-        if (!targetModelRepo.includes("/")) {
-            targetModelRepo = "Kaulela/l3_master_sovereign_model";
+        // Dynamic Reasoning & Token Depth Configuration based on Selected Tier
+        let maxTokens = 1200;
+        let reasoningInstruction = "Provide thorough, structured research analysis.";
+
+        switch (tier) {
+            case 'research-low':
+                maxTokens = 600;
+                reasoningInstruction = "Provide concise, direct research-backed analysis.";
+                break;
+            case 'research-medium':
+                maxTokens = 1200;
+                reasoningInstruction = "Provide balanced, structured multi-disciplinary research.";
+                break;
+            case 'research-high':
+                maxTokens = 2500;
+                reasoningInstruction = "Provide exhaustive, highly granular academic and technical research breakdown.";
+                break;
+            case 'deep-research':
+                maxTokens = 4000;
+                reasoningInstruction = "Execute deep autonomous research synthesis with exhaustive cross-disciplinary documentation.";
+                break;
+            case 'master-low':
+                maxTokens = 1500;
+                reasoningInstruction = "Act as L3 Master Sovereign with broad, efficient professional oversight across law, code, and engineering.";
+                break;
+            case 'master-high':
+                maxTokens = 4000;
+                reasoningInstruction = "Act as L3 Master Sovereign with absolute, uncompromising elite precision and deep structural code/law execution.";
+                break;
         }
 
-        const hfEndpoint = `https://api-inference.huggingface.co/models/${targetModelRepo}`;
+        // FIXED: Using the new active Hugging Face router endpoint (bypasses deprecated api-inference domain)
+        const hfEndpoint = "https://router.huggingface.co/hf-inference/models/Kaulela/l3_master_sovereign_model";
         
-        // Format prompt for instruction tuning
-        const formattedPrompt = `<|im_start|>system\nYou are L3 AI Master Sovereign, an omni-disciplinary expert intelligence across law, coding, engineering, and philosophy.<|im_end|>\n<|im_start|>user\n${userPrompt}<|im_end|>\n<|im_start|>assistant\n`;
+        const formattedPrompt = `<|im_start|>system\nYou are L3 AI Master Sovereign. ${reasoningInstruction}<|im_end|>\n<|im_start|>user\n${userPrompt}<|im_end|>\n<|im_start|>assistant\n`;
 
-        // Send request to Hugging Face Serverless Inference API
         const hfResponse = await axios.post(
             hfEndpoint,
             {
                 inputs: formattedPrompt,
-                parameters: { max_new_tokens: 1000, temperature: 0.7, return_full_text: false }
+                parameters: { 
+                    max_new_tokens: maxTokens, 
+                    temperature: 0.7, 
+                    return_full_text: false 
+                }
             },
             {
                 headers: {
                     "Authorization": `Bearer ${process.env.HF_TOKEN}`,
                     "Content-Type": "application/json"
                 },
-                timeout: 45000 // 45-second timeout for model execution
+                timeout: 60000 // 60-second timeout for deep research token generation
             }
         );
 
         let aiReply = "";
         const data = hfResponse.data;
 
-        // Handle Hugging Face cold start / loading states
+        // Handle cold start / loading states
         if (data.error) {
             aiReply = `[Hugging Face Notice]: Model container is warming up (${data.error}). Please wait 20 seconds and resend your prompt.`;
         } else if (Array.isArray(data) && data[0]?.generated_text) {
@@ -192,7 +214,6 @@ app.post('/v1/chat/completions', async (req, res) => {
             aiReply = typeof data === 'string' ? data : JSON.stringify(data);
         }
 
-        // Return OpenAI-compatible response structure
         res.json({
             choices: [{
                 message: {
@@ -206,12 +227,11 @@ app.post('/v1/chat/completions', async (req, res) => {
         const errorDetails = error.response?.data?.error || error.message;
         console.error("Inference Error:", errorDetails);
 
-        // Graceful error response so the frontend UI displays a helpful explanation rather than failing silently
         res.json({
             choices: [{
                 message: {
                     role: "assistant",
-                    content: `[Sovereign Node Notice]: ${errorDetails}. If your weights were recently pushed, Hugging Face may take up to 60 seconds to initialize the inference container.`
+                    content: `[Sovereign Node Notice]: ${errorDetails}. If your weights were recently uploaded, Hugging Face may take up to 60 seconds to initialize the serverless container.`
                 }
             }]
         });
