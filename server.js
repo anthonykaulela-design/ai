@@ -11,28 +11,47 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Initialize Hugging Face's modern OpenAI-compatible router client
+// ==========================================
+// 1. Environment & Token Diagnostic Checks
+// ==========================================
+const rawToken = process.env.HF_TOKEN ? process.env.HF_TOKEN.trim() : "";
+
+if (!rawToken) {
+    console.error("⚠️ CRITICAL WARNING: HF_TOKEN is not defined in Render environment variables!");
+} else if (!rawToken.startsWith("hf_")) {
+    console.warn("⚠️ TOKEN FORMAT WARNING: HF_TOKEN does not start with 'hf_'. Check for improper formatting or missing prefixes.");
+} else {
+    console.log(`✅ HF_TOKEN detected: Prefix '${rawToken.substring(0, 5)}...' (Length: ${rawToken.length})`);
+}
+
+// Initialize Hugging Face OpenAI-compatible Client Gateway
 const hfClient = new OpenAI({
     baseURL: "https://router.huggingface.co/v1",
-    apiKey: process.env.HF_TOKEN ? process.env.HF_TOKEN.trim() : ""
+    apiKey: rawToken
 });
 
 // ==========================================
-// 1. TiDB Cloud Connection & Initialization
+// 2. TiDB Cloud Connection & Initialization
 // ==========================================
-const pool = mysql.createPool({
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-    port: process.env.DB_PORT || 4000,
-    ssl: { rejectUnauthorized: true }, // Mandatory TLS/SSL for TiDB Serverless
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0
-});
+let pool;
+try {
+    pool = mysql.createPool({
+        host: process.env.DB_HOST,
+        user: process.env.DB_USER,
+        password: process.env.DB_PASSWORD,
+        database: process.env.DB_NAME,
+        port: process.env.DB_PORT || 4000,
+        ssl: { rejectUnauthorized: true }, // Mandatory TLS/SSL for TiDB Cloud
+        waitForConnections: true,
+        connectionLimit: 10,
+        queueLimit: 0
+    });
+} catch (dbInitErr) {
+    console.error("Database connection pool creation failed:", dbInitErr.message);
+}
 
 async function initializeDatabase() {
+    if (!pool) return;
     try {
         const connection = await pool.getConnection();
         await connection.query(`USE ${process.env.DB_NAME || 'l3_ai_db'};`);
@@ -73,16 +92,16 @@ async function initializeDatabase() {
         `);
 
         connection.release();
-        console.log("TiDB Cloud tables initialized successfully.");
+        console.log("✅ TiDB Cloud tables initialized successfully.");
     } catch (err) {
-        console.error("Database initialization warning:", err.message);
+        console.error("⚠️ Database initialization notice:", err.message);
     }
 }
 
 initializeDatabase();
 
 // ==========================================
-// 2. Authentication Endpoints
+// 3. Authentication Endpoints
 // ==========================================
 app.post('/api/auth/register', async (req, res) => {
     try {
@@ -140,13 +159,25 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 // ==========================================
-// 3. APIaaS Chat Completions Endpoint
+// 4. APIaaS Chat Completions Endpoint
 // ==========================================
 app.post('/v1/chat/completions', async (req, res) => {
     try {
         const { messages, tier } = req.body;
         if (!messages || !Array.isArray(messages) || messages.length === 0) {
             return res.status(400).json({ error: "Invalid request format. Messages array required." });
+        }
+
+        // Check if token exists before making request
+        if (!rawToken) {
+            return res.json({
+                choices: [{
+                    message: {
+                        role: "assistant",
+                        content: "[Sovereign Node Notice]: HF_TOKEN environment variable is not defined on Render. Please configure it in your Render Dashboard settings."
+                    }
+                }]
+            });
         }
 
         // Map frontend reasoning tiers to token depth and system instructions
@@ -185,9 +216,11 @@ app.post('/v1/chat/completions', async (req, res) => {
             ...messages
         ];
 
-        // Query Hugging Face's router using standard OpenAI-compatible client syntax
+        // Primary supported Hugging Face serverless provider route
+        const modelTarget = process.env.L3_MODEL_TARGET || "Qwen/Qwen2.5-7B-Instruct:fastest";
+
         const completion = await hfClient.chat.completions.create({
-            model: "Qwen/Qwen2.5-7B-Instruct:fastest",
+            model: modelTarget,
             messages: fullMessages,
             max_tokens: maxTokens,
             temperature: 0.7
@@ -205,13 +238,18 @@ app.post('/v1/chat/completions', async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Inference Error:", error.message || error);
+        console.error("Inference Error:", error.status, error.message || error);
+
+        let userNotice = error.message || "Inference failed";
+        if (error.status === 401) {
+            userNotice = "401 Unauthorized - Invalid HF_TOKEN. Ensure your token in Render Environment starts with 'hf_' and has Inference permissions.";
+        }
 
         res.json({
             choices: [{
                 message: {
                     role: "assistant",
-                    content: `[Sovereign Node Notice]: ${error.message || "Inference failed"}. Please verify your HF_TOKEN environment variable on Render.`
+                    content: `[Sovereign Node Notice]: ${userNotice}`
                 }
             }]
         });
@@ -219,9 +257,9 @@ app.post('/v1/chat/completions', async (req, res) => {
 });
 
 // ==========================================
-// 4. Server Listener Startup
+// 5. Server Listener Startup
 // ==========================================
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-    console.log(`L3 AI Sovereign Production Backend running on port ${PORT}`);
+    console.log(`🚀 L3 AI Sovereign Production Backend running on port ${PORT}`);
 });
