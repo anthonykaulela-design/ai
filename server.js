@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const axios = require('axios');
+const { HfInference } = require('@huggingface/inference');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 require('dotenv').config();
@@ -10,6 +10,9 @@ const app = express();
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Initialize Hugging Face Inference SDK (automatically handles router domains)
+const hf = new HfInference(process.env.HF_TOKEN);
 
 // ==========================================
 // 1. TiDB Cloud Connection & Initialization
@@ -143,8 +146,6 @@ app.post('/v1/chat/completions', async (req, res) => {
             return res.status(400).json({ error: "Invalid request format. Messages array required." });
         }
 
-        const userPrompt = messages[messages.length - 1].content;
-        
         // Map frontend reasoning tiers to token depth and system instructions
         let maxTokens = 1200;
         let reasoningInstruction = "Provide thorough, structured research analysis.";
@@ -164,7 +165,7 @@ app.post('/v1/chat/completions', async (req, res) => {
                 break;
             case 'deep-research':
                 maxTokens = 4000;
-                reasoningInstruction = "Execute deep autonomous research synthesis with exhaustive cross-disciplinary documentation, edge-case protection, and formal verification.";
+                reasoningInstruction = "Execute deep autonomous research synthesis with exhaustive cross-disciplinary documentation and edge-case protection.";
                 break;
             case 'master-low':
                 maxTokens = 1500;
@@ -176,43 +177,21 @@ app.post('/v1/chat/completions', async (req, res) => {
                 break;
         }
 
-        // Explicitly pointing to a fully supported serverless model on the hf-inference router
-        const hfEndpoint = process.env.L3_MODEL_ENDPOINT || "https://router.huggingface.co/hf-inference/models/Qwen/Qwen2.5-7B-Instruct";
-        
-        const formattedPrompt = `<|im_start|>system\nYou are L3 AI Master Sovereign. ${reasoningInstruction}<|im_end|>\n<|im_start|>user\n${userPrompt}<|im_end|>\n<|im_start|>assistant\n`;
+        // Prepend system instructions to the chat history array for Qwen
+        const fullMessages = [
+            { role: "system", content: `You are L3 AI Master Sovereign. ${reasoningInstruction}` },
+            ...messages
+        ];
 
-        const hfResponse = await axios.post(
-            hfEndpoint,
-            {
-                inputs: formattedPrompt,
-                parameters: { 
-                    max_new_tokens: maxTokens, 
-                    temperature: 0.7, 
-                    return_full_text: false 
-                }
-            },
-            {
-                headers: {
-                    "Authorization": `Bearer ${process.env.HF_TOKEN}`,
-                    "Content-Type": "application/json"
-                },
-                timeout: 60000 // 60-second timeout for deep research token generation
-            }
-        );
+        // Use official HF SDK chatCompletion method targeting a fully supported fast serverless model
+        const response = await hf.chatCompletion({
+            model: "Qwen/Qwen2.5-7B-Instruct",
+            messages: fullMessages,
+            max_tokens: maxTokens,
+            temperature: 0.7
+        });
 
-        let aiReply = "";
-        const data = hfResponse.data;
-
-        // Handle cold start / loading states
-        if (data.error) {
-            aiReply = `[Hugging Face Notice]: Model container is warming up (${data.error}). Please wait 20 seconds and resend your prompt.`;
-        } else if (Array.isArray(data) && data[0]?.generated_text) {
-            aiReply = data[0].generated_text.trim();
-        } else if (data?.generated_text) {
-            aiReply = data.generated_text.trim();
-        } else {
-            aiReply = typeof data === 'string' ? data : JSON.stringify(data);
-        }
+        const aiReply = response.choices?.[0]?.message?.content || "No response generated.";
 
         res.json({
             choices: [{
@@ -224,14 +203,13 @@ app.post('/v1/chat/completions', async (req, res) => {
         });
 
     } catch (error) {
-        const errorDetails = error.response?.data?.error || error.message;
-        console.error("Inference Error:", errorDetails);
+        console.error("Inference Error:", error.message || error);
 
         res.json({
             choices: [{
                 message: {
                     role: "assistant",
-                    content: `[Sovereign Node Notice]: ${errorDetails}. Please verify your HF_TOKEN environment variable on Render.`
+                    content: `[Sovereign Node Notice]: ${error.message || "Inference failed"}. Please verify your HF_TOKEN environment variable on Render.`
                 }
             }]
         });
