@@ -176,8 +176,8 @@ app.post('/v1/chat/completions', async (req, res) => {
                 break;
         }
 
-        // Using Hugging Face's high-performance serverless instruction model (fully supported by hf-inference router)
-        const hfEndpoint = "https://router.huggingface.co/hf-inference/models/Qwen/Qwen2.5-7B-Instruct";
+        // Explicitly pointing to a fully supported serverless model on the hf-inference router
+        const hfEndpoint = process.env.L3_MODEL_ENDPOINT || "https://router.huggingface.co/hf-inference/models/Qwen/Qwen2.5-7B-Instruct";
         
         const formattedPrompt = `<|im_start|>system\nYou are L3 AI Master Sovereign. ${reasoningInstruction}<|im_end|>\n<|im_start|>user\n${userPrompt}<|im_end|>\n<|im_start|>assistant\n`;
 
