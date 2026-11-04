@@ -13,7 +13,7 @@ app.use(express.json());
 // ==========================================
 // 1. Direct Space Endpoint Configuration
 // ==========================================
-// Explicitly target your custom space backend URL
+// Cleanly strip trailing slashes to ensure proper route joining
 const SPACE_BASE_URL = (process.env.L3_CUSTOM_SPACE_URL || "https://kaulela-l3-master-sovereign-ai.hf.space").replace(/\/+$/, '');
 const HF_TOKEN = process.env.HF_TOKEN ? process.env.HF_TOKEN.trim() : "";
 
@@ -193,7 +193,7 @@ app.post('/v1/chat/completions', async (req, res) => {
             ...messages
         ];
 
-        // Prepare direct HTTP payload for your Space FastAPI endpoint
+        // Direct target route for your Hugging Face Space FastAPI app
         const targetUrl = `${SPACE_BASE_URL}/v1/chat/completions`;
         const headers = {
             'Content-Type': 'application/json'
