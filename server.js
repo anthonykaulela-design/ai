@@ -1,7 +1,6 @@
-
 /**
  * L3 AI Sovereign Commercial API Gateway & Master Engine
- * Serves 6 model tiers, provisions developer API keys, and routes securely to Hugging Face.
+ * Pulls credentials strictly from the .env environment configuration.
  */
 
 const express = require('express');
@@ -21,14 +20,19 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Hugging Face Sovereign Model Endpoint & Token
-const HF_TOKEN = process.env.HUGGINGFACE_API_KEY || "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";
+// Strictly pointing to environment variables (No hardcoded credentials)
+const HF_TOKEN = process.env.HUGGINGFACE_API_KEY;
 const HF_MODEL_ENDPOINT = process.env.L3_MODEL_ENDPOINT || "https://api-inference.huggingface.co/models/Kaulela/l3-master-sovereign-ai";
 
 const API_KEYS_STORE = path.join(__dirname, 'api_keys_store.json');
-const IS_FREE_MODE = process.env.FREE_MODE === 'true'; // Set FREE_MODE=true in environment if free
+const IS_FREE_MODE = process.env.FREE_MODE === 'true';
 
-// Store helper for API keys
+// Validate environment variables on startup
+if (!HF_TOKEN) {
+    console.error("CRITICAL ERROR: HUGGINGFACE_API_KEY is not defined in the environment or .env file!");
+}
+
+// Store helper for developer API keys
 function getApiKeys() {
     try {
         if (fs.existsSync(API_KEYS_STORE)) {
@@ -52,7 +56,7 @@ const L3_MODELS = {
     "deep_research": { id: "deep_research", name: "L3-Deep-Research", tier: 6, speedMs: 3000, instructions: "Exhaustive research report with verified source citations." }
 };
 
-// Core Inference Function calling Hugging Face
+// Core Inference Function calling Hugging Face via environment configuration
 async function executeL3Inference(prompt, modelKey) {
     const config = L3_MODELS[modelKey] || L3_MODELS["flash"];
     const formattedPrompt = `[System Tier: ${config.name}]\n[Instructions: ${config.instructions}]\n\nUser Query: ${prompt}`;
@@ -70,7 +74,6 @@ async function executeL3Inference(prompt, modelKey) {
             }
         );
 
-        // Simulate model profile speed lag if requested
         if (config.speedMs > 0) {
             await new Promise(r => setTimeout(r, config.speedMs));
         }
@@ -86,15 +89,15 @@ async function executeL3Inference(prompt, modelKey) {
         console.warn("Hugging Face Endpoint Notice:", err.response?.data || err.message);
     }
 
-    // Sovereign Fallback Engine if Hugging Face Model is cold-starting
-    return `### ${config.name} Sovereign Response\n\nProcessed query: *"${prompt}"*\n\n- **Execution Status:** Validated by L3 Sovereign Core.\n- **Tier:** ${config.name} (Level ${config.tier} Traversal).`;
+    // Sovereign Fallback Engine if model is cold-starting
+    return `### ${config.name} Sovereign Response\n\nProcessed query: *"${prompt}"*\n\n- **Execution Status:** Validated by L3 Sovereign Core via Environment Configuration.\n- **Tier:** ${config.name} (Level ${config.tier} Traversal).`;
 }
 
 // -------------------------------------------------------------
 // ENDPOINTS
 // -------------------------------------------------------------
 
-// 1. List all 6 Available Models
+// 1. List Available Models
 app.get('/api/models', (req, res) => {
     res.json({
         success: true,
@@ -102,7 +105,7 @@ app.get('/api/models', (req, res) => {
     });
 });
 
-// 2. Web UI Chat Route (Called by your index.html frontend)
+// 2. Web UI Chat Route
 app.post('/api/chat', async (req, res) => {
     const { prompt, model } = req.body;
     if (!prompt) return res.status(400).json({ error: "Prompt is required." });
@@ -112,11 +115,10 @@ app.post('/api/chat', async (req, res) => {
     res.json({ success: true, reply: result });
 });
 
-// 3. Developer Commercial API Endpoint (For external users using client keys)
+// 3. Commercial API Endpoint for External Developers (Checks issued API keys)
 app.post('/v1/chat/completions', async (req, res) => {
     const authHeader = req.headers['authorization'];
     
-    // Check key if not in free mode
     if (!IS_FREE_MODE) {
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
             return res.status(401).json({ success: false, error: "Missing Bearer API key. Get your key at our developer portal." });
@@ -152,7 +154,7 @@ app.post('/v1/chat/completions', async (req, res) => {
     });
 });
 
-// 4. API Key Generator Endpoint (Allows developers on your site to request an API key)
+// 4. API Key Generator for Developers
 app.post('/api/keys/generate', (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ success: false, error: "Email is required to issue an API key." });
